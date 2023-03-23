@@ -37,6 +37,8 @@ class Receiver {
 		console.log("connecting");
 
         this.ws = new WebSocket(window.location.href.replace(/^http/, "ws") + 'ws');
+        // for debug
+        // this.ws = new WebSocket('ws://115.165.166.40:8889/mystream/ws');
 
         this.ws.onerror = () => {
             console.log("ws error");
@@ -54,6 +56,13 @@ class Receiver {
         };
 
         this.ws.onmessage = (msg) => this.onIceServers(msg);
+        
+        this.ws.onopen = () => {
+            console.log("WS openned");
+            const data = { token: "eyJhbGciOiJIUzI1NiJ9.eyJqdGkiOiJIMTg4NTRxYThKU28iLCJpYXQiOjE2Nzg0NjM0NDgsInN1YiI6IkgxODg1NHFhOEpTbyIsImlzcyI6IkgxODg1NHFhOEpTbyIsImV4cCI6MTkzNzY2MzQ0OH0.TYQ1x1tTSl1wzZ8FC90SJuzlYh9QaBYlaDidNDoYXkM"};
+            this.ws.send(JSON.stringify(data));
+            console.log("WS send token = ", JSON.stringify(data));
+        }
 	}
 
     onIceServers(msg) {
