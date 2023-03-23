@@ -98,6 +98,10 @@ type webRTCServer struct {
 	done chan struct{}
 }
 
+type WsToken struct {
+    Token string `json:"token"`
+}
+
 func newWebRTCServer(
 	parentCtx context.Context,
 	externalAuthenticationURL string,
@@ -368,19 +372,20 @@ func (s *webRTCServer) onRequest(ctx *gin.Context) {
 		return
 	}
 
-	err := s.authenticate(res.path, ctx)
-	if err != nil {
-		if terr, ok := err.(pathErrAuthCritical); ok {
-			s.log(logger.Info, "authentication error: %s", terr.message)
-			ctx.Writer.Header().Set("WWW-Authenticate", `Basic realm="rtsp-simple-server"`)
-			ctx.Writer.WriteHeader(http.StatusUnauthorized)
-			return
-		}
+	// err := s.authenticate(res.path, ctx)
+	// if err != nil {
+	// 	if terr, ok := err.(pathErrAuthCritical); ok {
+	// 		s.log(logger.Info, "authentication error: %s", terr.message)
+	// 		ctx.Writer.Header().Set("WWW-Authenticate", `Basic realm="rtsp-simple-server"`)
+	// 		ctx.Writer.WriteHeader(http.StatusUnauthorized)
+	// 		return
+	// 	}
 
-		ctx.Writer.Header().Set("WWW-Authenticate", `Basic realm="rtsp-simple-server"`)
-		ctx.Writer.WriteHeader(http.StatusUnauthorized)
-		return
-	}
+	// 	ctx.Writer.Header().Set("WWW-Authenticate", `Basic realm="rtsp-simple-server"`)
+	// 	ctx.Writer.WriteHeader(http.StatusUnauthorized)
+	// 	s.log(logger.Info, "authenticate error 1")
+	// 	return
+	// }
 
 	switch fname {
 	case "":
@@ -395,6 +400,25 @@ func (s *webRTCServer) onRequest(ctx *gin.Context) {
 			return
 		}
 		defer wsconn.Close()
+
+		s.log(logger.Info, "Waiting access token from WS")
+		// req := s.connNew
+
+		var msg WsToken
+		err = wsconn.ReadJSON(&msg)
+		if err != nil {
+			return
+		}
+		s.log(logger.Info, "GET access token: %s", msg.Token)
+		err = s.authenticateWs(res.path, ctx, msg.Token)
+		if err != nil {
+			if terr, ok := err.(pathErrAuthCritical); ok {
+				s.log(logger.Info, "authentication error: %s", terr.message)
+				ctx.Writer.Header().Set("WWW-Authenticate", `Basic realm="rtsp-simple-server"`)
+				ctx.Writer.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+		}
 
 		c := s.newConn(dir, wsconn)
 		if c == nil {
@@ -468,6 +492,55 @@ func (s *webRTCServer) authenticate(pa *path, ctx *gin.Context) error {
 		}
 
 		if user != string(pathUser) || pass != string(pathPass) {
+			return pathErrAuthCritical{
+				message: "invalid credentials",
+			}
+		}
+	}
+
+	return nil
+}
+
+func (s *webRTCServer) authenticateWs(pa *path, ctx *gin.Context, token string) error {
+	pathConf := pa.safeConf()
+	pathIPs := pathConf.ReadIPs
+	pathUser := pathConf.ReadUser
+	// pathPass := pathConf.ReadPass
+
+	if s.externalAuthenticationURL != "" {
+		ip := net.ParseIP(ctx.ClientIP())
+		user := token
+		pass := ""
+
+		err := externalAuth(
+			s.externalAuthenticationURL,
+			ip.String(),
+			user,
+			pass,
+			pa.name,
+			externalAuthProtoWebRTC,
+			nil,
+			false,
+			ctx.Request.URL.RawQuery)
+		if err != nil {
+			return pathErrAuthCritical{
+				message: fmt.Sprintf("external authentication failed: %s", err),
+			}
+		}
+	}
+
+	if pathIPs != nil {
+		ip := net.ParseIP(ctx.ClientIP())
+
+		if !ipEqualOrInRange(ip, pathIPs) {
+			return pathErrAuthCritical{
+				message: fmt.Sprintf("IP '%s' not allowed", ip),
+			}
+		}
+	}
+
+	if pathUser != "" {
+		if token != string(pathUser) {
 			return pathErrAuthCritical{
 				message: "invalid credentials",
 			}
