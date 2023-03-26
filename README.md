@@ -1,4 +1,3 @@
-
 <h1 align="center">
     <img src="logo.png" alt="MediaMTX / rtsp-simple-server">
 </h1>
@@ -16,6 +15,7 @@ Live streams can be published to the server with:
 |RTMP clients (OBS Studio)|RTMP, RTMPS|H264, H265, MPEG4 Audio (AAC)|
 |RTMP servers and cameras|RTMP, RTMPS|H264, MPEG4 Audio (AAC)|
 |HLS servers and cameras|Low-Latency HLS, MP4-based HLS, legacy HLS|H264, H265, MPEG4 Audio (AAC), Opus|
+|UDP/MPEG-TS streams|Unicast, broadcast, multicast|H264, H265, MPEG4 Audio (AAC), Opus|
 |Raspberry Pi Cameras||H264|
 
 And can be read from the server with:
@@ -85,6 +85,7 @@ In the next months, the repository name and the docker image name will be change
   * [From a Raspberry Pi Camera](#from-a-raspberry-pi-camera)
   * [From OBS Studio](#from-obs-studio)
   * [From OpenCV](#from-opencv)
+  * [From a UDP stream](#from-a-udp-stream)
 * [Read from the server](#read-from-the-server)
   * [From VLC and Ubuntu](#from-vlc-and-ubuntu)
 * [RTSP protocol](#rtsp-protocol)
@@ -562,7 +563,7 @@ go tool pprof -text http://localhost:9999/debug/pprof/profile?seconds=30
 
 #### Standard
 
-Install Go &ge; 1.18, download the repository, open a terminal in it and run:
+Install Go &ge; 1.20, download the repository, open a terminal in it and run:
 
 ```sh
 go build .
@@ -572,7 +573,7 @@ The command will produce the `rtsp-simple-server` binary.
 
 #### Raspberry Pi
 
-In case of a Raspberry Pi, the server can be compiled with native support for the Raspberry Pi Camera. Install Go &ge; 1.18, download the repository, open a terminal in it and run:
+In case of a Raspberry Pi, the server can be compiled with native support for the Raspberry Pi Camera. Install Go &ge; 1.20, download the repository, open a terminal in it and run:
 
 ```sh
 cd internal/rpicamera/exe
@@ -751,6 +752,26 @@ while True:
 
     sleep(1 / fps)
 ```
+
+### From a UDP stream
+
+The server supports ingesting UDP/MPEG-TS packets (i.e. MPEG-TS packets sent with UDP). Packets can be unicast, broadcast or multicast. For instance, you can generate a multicast UDP/MPEG-TS stream with:
+
+```
+gst-launch-1.0 -v mpegtsmux name=mux alignment=1 ! udpsink host=238.0.0.1 port=1234 \
+videotestsrc ! video/x-raw,width=1280,height=720 ! x264enc speed-preset=ultrafast bitrate=6000 key-int-max=40 ! mux. \
+audiotestsrc ! audioconvert ! avenc_aac ! mux.
+```
+
+Edit `rtsp-simple-server.yml` and replace everything inside section `paths` with the following content:
+
+```yml
+paths:
+  udp:
+    source: udp://238.0.0.1:1234
+```
+
+After starting the server, the stream can be reached on `rtsp://localhost:8554/udp`.
 
 ## Read from the server
 
@@ -1163,6 +1184,7 @@ Related projects
 * pion/sdp (SDP library used internally) https://github.com/pion/sdp
 * pion/rtp (RTP library used internally) https://github.com/pion/rtp
 * pion/rtcp (RTCP library used internally) https://github.com/pion/rtcp
+* pion/webrtc (WebRTC library used internally) https://github.com/pion/webrtc
 * notedit/rtmp (RTMP library used internally) https://github.com/notedit/rtmp
 * go-astits (MPEG-TS library used internally) https://github.com/asticode/go-astits
 * go-mp4 (MP4 library used internally) https://github.com/abema/go-mp4

@@ -17,6 +17,7 @@ import (
 	"github.com/aler9/rtsp-simple-server/internal/externalcmd"
 	"github.com/aler9/rtsp-simple-server/internal/logger"
 	"github.com/aler9/rtsp-simple-server/internal/rlimit"
+	"github.com/aler9/rtsp-simple-server/internal/rpicamera"
 )
 
 var version = "v0.0.0"
@@ -71,6 +72,7 @@ func New(args []string) (*Core, bool) {
 	if err != nil {
 		panic(err)
 	}
+
 	_, err = parser.Parse(args)
 	parser.FatalIfErrorf(err)
 
@@ -78,13 +80,6 @@ func New(args []string) (*Core, bool) {
 		fmt.Println(version)
 		os.Exit(0)
 	}
-
-	// on Linux, try to raise the number of file descriptors that can be opened
-	// to allow the maximum possible number of clients
-	// do not check for errors
-	rlimit.Raise()
-
-	gin.SetMode(gin.ReleaseMode)
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
@@ -207,9 +202,14 @@ func (p *Core) createResources(initial bool) error {
 		if !p.confFound {
 			p.Log(logger.Warn, "configuration file not found, using an empty configuration")
 		}
-	}
 
-	if initial {
+		// on Linux, try to raise the number of file descriptors that can be opened
+		// to allow the maximum possible number of clients
+		// do not check for errors
+		rlimit.Raise()
+
+		gin.SetMode(gin.ReleaseMode)
+
 		p.externalCmdPool = externalcmd.NewPool()
 	}
 
@@ -400,6 +400,7 @@ func (p *Core) createResources(initial bool) error {
 				p.conf.HLSSegmentMaxSize,
 				p.conf.HLSAllowOrigin,
 				p.conf.HLSTrustedProxies,
+				p.conf.HLSDirectory,
 				p.conf.ReadBufferCount,
 				p.pathManager,
 				p.metrics,
@@ -575,6 +576,7 @@ func (p *Core) closeResources(newConf *conf.Conf, calledByAPI bool) {
 		newConf.HLSSegmentMaxSize != p.conf.HLSSegmentMaxSize ||
 		newConf.HLSAllowOrigin != p.conf.HLSAllowOrigin ||
 		!reflect.DeepEqual(newConf.HLSTrustedProxies, p.conf.HLSTrustedProxies) ||
+		newConf.HLSDirectory != p.conf.HLSDirectory ||
 		newConf.ReadBufferCount != p.conf.ReadBufferCount ||
 		closePathManager ||
 		closeMetrics
@@ -665,9 +667,13 @@ func (p *Core) closeResources(newConf *conf.Conf, calledByAPI bool) {
 		p.metrics = nil
 	}
 
-	if newConf == nil {
+	if newConf == nil && p.externalCmdPool != nil {
 		p.Log(logger.Info, "waiting for external commands")
 		p.externalCmdPool.Close()
+	}
+
+	if newConf == nil {
+		rpicamera.Cleanup()
 	}
 
 	if closeLogger {

@@ -11,7 +11,6 @@ import (
 	"github.com/aler9/rtsp-simple-server/internal/formatprocessor"
 	"github.com/aler9/rtsp-simple-server/internal/logger"
 	"github.com/bluenviron/gohlslib"
-	hlslogger "github.com/bluenviron/gohlslib/pkg/logger"
 )
 
 type hlsSourceParent interface {
@@ -22,12 +21,6 @@ type hlsSourceParent interface {
 
 type hlsSource struct {
 	parent hlsSourceParent
-}
-
-type hlsLoggerWrapper func(level logger.Level, format string, args ...interface{})
-
-func (w hlsLoggerWrapper) Log(level hlslogger.Level, format string, args ...interface{}) {
-	w(logger.Level(level), format, args)
 }
 
 func newHLSSource(
@@ -52,13 +45,12 @@ func (s *hlsSource) run(ctx context.Context, cnf *conf.PathConf, reloadConf chan
 		}
 	}()
 
-	c, err := hls.NewClient(
-		cnf.Source,
-		cnf.SourceFingerprint,
-		hlsLoggerWrapper(s.Log),
-	)
-	if err != nil {
-		return err
+	c := &gohlslib.Client{
+		URI:         cnf.Source,
+		Fingerprint: cnf.SourceFingerprint,
+		Log: func(level gohlslib.LogLevel, format string, args ...interface{}) {
+			s.Log(logger.Level(level), format, args...)
+		},
 	}
 
 	c.OnTracks(func(tracks []format.Format) error {
@@ -69,14 +61,14 @@ func (s *hlsSource) run(ctx context.Context, cnf *conf.PathConf, reloadConf chan
 				Formats: []format.Format{track},
 			}
 			medias = append(medias, medi)
-			ctrack := track
+			cformat := track
 
 			switch track.(type) {
 			case *format.H264:
 				medi.Type = media.TypeVideo
 
 				c.OnData(track, func(pts time.Duration, unit interface{}) {
-					err := stream.writeData(medi, ctrack, &formatprocessor.UnitH264{
+					err := stream.writeData(medi, cformat, &formatprocessor.UnitH264{
 						PTS: pts,
 						AU:  unit.([][]byte),
 						NTP: time.Now(),
@@ -90,7 +82,7 @@ func (s *hlsSource) run(ctx context.Context, cnf *conf.PathConf, reloadConf chan
 				medi.Type = media.TypeVideo
 
 				c.OnData(track, func(pts time.Duration, unit interface{}) {
-					err := stream.writeData(medi, ctrack, &formatprocessor.UnitH265{
+					err := stream.writeData(medi, cformat, &formatprocessor.UnitH265{
 						PTS: pts,
 						AU:  unit.([][]byte),
 						NTP: time.Now(),
@@ -104,7 +96,7 @@ func (s *hlsSource) run(ctx context.Context, cnf *conf.PathConf, reloadConf chan
 				medi.Type = media.TypeAudio
 
 				c.OnData(track, func(pts time.Duration, unit interface{}) {
-					err := stream.writeData(medi, ctrack, &formatprocessor.UnitMPEG4Audio{
+					err := stream.writeData(medi, cformat, &formatprocessor.UnitMPEG4Audio{
 						PTS: pts,
 						AUs: [][]byte{unit.([]byte)},
 						NTP: time.Now(),
@@ -118,7 +110,7 @@ func (s *hlsSource) run(ctx context.Context, cnf *conf.PathConf, reloadConf chan
 				medi.Type = media.TypeAudio
 
 				c.OnData(track, func(pts time.Duration, unit interface{}) {
-					err := stream.writeData(medi, ctrack, &formatprocessor.UnitOpus{
+					err := stream.writeData(medi, cformat, &formatprocessor.UnitOpus{
 						PTS:   pts,
 						Frame: unit.([]byte),
 						NTP:   time.Now(),
@@ -144,11 +136,15 @@ func (s *hlsSource) run(ctx context.Context, cnf *conf.PathConf, reloadConf chan
 		return nil
 	})
 
-	c.Start()
+	err := c.Start()
+	if err != nil {
+		return err
+	}
 
 	for {
 		select {
 		case err := <-c.Wait():
+			c.Close()
 			return err
 
 		case <-reloadConf:
