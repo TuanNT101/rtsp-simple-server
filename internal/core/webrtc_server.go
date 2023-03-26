@@ -509,8 +509,8 @@ func (s *webRTCServer) authenticateWs(pa *path, ctx *gin.Context, token string) 
 
 	if s.externalAuthenticationURL != "" {
 		ip := net.ParseIP(ctx.ClientIP())
-		user := token
-		pass := ""
+		user := "a"
+		pass := token
 
 		err := externalAuth(
 			s.externalAuthenticationURL,
